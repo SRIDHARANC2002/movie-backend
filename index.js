@@ -30,27 +30,42 @@ app.use(compression());
 // ✅ Correct CORS Configuration - Allow both local and deployed frontends
 const allowedOrigins = [
   'http://localhost:3000',                    // local frontend
-  'http://localhost:5005',                     // local backend (if needed)
-  'https://movie-frontend-vfa4.vercel.app',    // production frontend
- 'https://movie-backend-4-nwi2.onrender.com'  // production backend
+  'http://localhost:5005',                    // local backend (if needed)
+  'http://localhost:5006',                    // alternate local backend
+  'http://localhost:5007',                    // alternate local backend
+  'https://movie-frontend-ikui.vercel.app',   // new production frontend
+  'https://movie-backend-4-qrw2.onrender.com'  // production backend
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);  // allow non-browser clients like Postman
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS: ' + origin));
-    }
-  },
- methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+// For production, use a strict CORS policy
+if (process.env.NODE_ENV === 'production') {
+  app.use(cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);  // allow non-browser clients like Postman
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ CORS blocked request from origin: ${origin}`);
+        callback(new Error('Not allowed by CORS: ' + origin));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+  }));
+} else {
+  // For development, allow all origins
+  console.log('🔓 Development mode: CORS allowing all origins');
+  app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+  }));
+}
 
 // Optional: CORS pre-flight logging
-app.use((req, res, next) => {
+app.use((req, _res, next) => {
   console.log('\n🔒 CORS Pre-flight Request:');
   console.log('Origin:', req.headers.origin);
   console.log('Method:', req.method);
@@ -91,7 +106,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/favorites', favoriteRoutes);
 
 // Test route
-app.get('/api/test', (req, res) => {
+app.get('/api/test', (_req, res) => {
   res.json({ message: 'Backend is working!' });
 });
 
