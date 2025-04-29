@@ -4,12 +4,16 @@ require('dotenv').config();
 
 async function checkUsers() {
   try {
-    console.log('🔄 Testing MongoDB Connection...');
-    const localUri = 'mongodb://localhost:27017/tamilMovieDB';
-    console.log('📍 URI:', localUri);
+    console.log('🔄 Testing MongoDB Atlas Connection...');
+    const mongoUri = process.env.MONGODB_URI;
+    console.log('📍 URI:', mongoUri);
 
-    await mongoose.connect(localUri);
-    console.log('✅ MongoDB Connected Successfully!');
+    await mongoose.connect(mongoUri, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    console.log('✅ MongoDB Atlas Connected Successfully!');
 
     // List all users
     const users = await User.find({}, { password: 0 }); // Exclude password field

@@ -127,7 +127,7 @@ const startServer = async () => {
 
     // Then connect to MongoDB
    // const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/tamilMovieDB';
-      const mongoUri = process.env.MONGODB_URI || 'mongodb+srv://sridharan:sridharan@cluster0.wsrdh.mongodb.net/tamilMovie-DB';
+  const mongoUri = process.env.MONGODB_URI || 'mongodb+srv://sridharan:sridharan@cluster0.wsrdh.mongodb.net/tamilMovie-DB';
     console.log('🔌 Connecting to MongoDB at:', mongoUri);
 
     try {

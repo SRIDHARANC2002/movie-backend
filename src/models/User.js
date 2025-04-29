@@ -55,6 +55,10 @@ const UserSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  profilePicture: {
+    type: String,
+    default: ''
+  },
   favorites: {
     type: [MovieSchema],
     default: []

@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { cloudinary } = require('../config/cloudinary');
 
 // Comprehensive Registration Controller
 exports.register = async (req, res) => {
@@ -99,57 +100,53 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if user exists
+    // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
     }
 
-    // Check password
+    // Verify password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
     }
 
-    // Generate JWT token
+    // Generate JWT token with 10 hours expiration
     const token = jwt.sign(
-      {
-        id: user._id,
-        email: user.email
-      },
+      { id: user._id },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: '10h' }
     );
 
-    // Log the complete user object for debugging
-    console.log('✅ Login successful, returning user data:', {
-      id: user._id,
-      fullName: user.fullName,
-      email: user.email,
-      phone: user.phone,
-      dateOfBirth: user.dateOfBirth,
-      address: user.address,
-      username: user.username,
-      name: user.name
-    });
-
-    res.json({
+    // Return user data with token
+    return res.status(200).json({
+      success: true,
       message: 'Login successful',
       token,
       user: {
         id: user._id,
-        fullName: user.fullName,
+        name: user.name || user.fullName,
         email: user.email,
         phone: user.phone || '',
         dateOfBirth: user.dateOfBirth || '',
         address: user.address || '',
         username: user.username || '',
-        name: user.name || user.fullName || ''
+        profilePicture: user.profilePicture || ''
       }
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error during login' });
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during login'
+    });
   }
 };
 
@@ -158,15 +155,15 @@ exports.updateUserDetails = async (req, res) => {
   try {
     console.log('\n📝 Update User Details Request Received');
     console.log('Request Body:', req.body);
+    console.log('Environment:', process.env.NODE_ENV);
 
     // User is available from auth middleware
     const userId = req.user._id;
 
     // Get updated fields from request body
-    const { name, email, phone, dateOfBirth, address, username } = req.body;
+    const { name, email, phone, dateOfBirth, address, username, profilePicture } = req.body;
 
     // Prepare update object with all fields from the request
-    // This ensures that even empty strings are saved (to clear fields)
     const updateData = {
       name: name !== undefined ? name : req.user.name,
       email: email !== undefined ? email : req.user.email,
@@ -176,35 +173,30 @@ exports.updateUserDetails = async (req, res) => {
       username: username !== undefined ? username : req.user.username
     };
 
-    console.log('🔄 Updating user with data:', updateData);
-    console.log('👤 User ID:', userId);
+    // Only update profile picture if we have a new image path or a non-data URL value
+    if (profilePicture && !profilePicture.startsWith('data:')) {
+      updateData.profilePicture = profilePicture;
+      console.log('🖼️ Adding profile picture URL to update data:', profilePicture);
+    }
 
-    // Find user and update
+    console.log('🔄 Updating user with data:', updateData);
+
+    // Find user and update in MongoDB Atlas
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       updateData,
-      { new: true, runValidators: true } // Return updated document and run schema validators
+      { new: true, runValidators: true }
     );
 
     if (!updatedUser) {
-      console.log('❌ User not found');
+      console.log('❌ User not found in database');
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    console.log('✅ User updated successfully');
-    console.log('📊 Updated user data:', {
-      id: updatedUser._id,
-      fullName: updatedUser.fullName,
-      email: updatedUser.email,
-      phone: updatedUser.phone,
-      dateOfBirth: updatedUser.dateOfBirth,
-      address: updatedUser.address,
-      username: updatedUser.username,
-      name: updatedUser.name
-    });
+    console.log('✅ User updated successfully in database');
 
     // Return updated user data
     return res.status(200).json({
@@ -212,20 +204,20 @@ exports.updateUserDetails = async (req, res) => {
       message: 'User details updated successfully',
       user: {
         id: updatedUser._id,
-        fullName: updatedUser.fullName,
+        name: updatedUser.name,
         email: updatedUser.email,
         phone: updatedUser.phone || '',
         dateOfBirth: updatedUser.dateOfBirth || '',
         address: updatedUser.address || '',
         username: updatedUser.username || '',
-        name: updatedUser.name || updatedUser.fullName || ''
+        profilePicture: updatedUser.profilePicture || ''
       }
     });
 
   } catch (error) {
     console.error('❌ Update user error:', error);
 
-    // Handle MongoDB duplicate key error (e.g., if email already exists)
+    // Handle MongoDB duplicate key error
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -236,6 +228,112 @@ exports.updateUserDetails = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update user details',
+      error: error.message
+    });
+  }
+};
+
+// Upload Profile Picture Controller
+exports.uploadProfilePicture = async (req, res) => {
+  try {
+    console.log('\n📸 Upload Profile Picture Request Received');
+
+    if (!req.file) {
+      console.log('❌ No file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    console.log('📁 File details:', req.file);
+
+    const userId = req.user._id;
+    // Get the secure URL from Cloudinary
+    const fileUrl = req.file.path; // Cloudinary URL is stored in path
+
+    if (!fileUrl) {
+      console.error('❌ No URL received from Cloudinary');
+      if (req.file.public_id) {
+        await cloudinary.uploader.destroy(req.file.public_id);
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get URL from Cloudinary'
+      });
+    }
+
+    // Update user with Cloudinary URL
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { profilePicture: fileUrl },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      console.log('❌ User not found');
+      if (req.file.public_id) {
+        await cloudinary.uploader.destroy(req.file.public_id);
+      }
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    console.log('✅ Profile picture updated successfully');
+    console.log('🖼️ Profile picture Cloudinary URL:', fileUrl);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile picture updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('❌ Upload profile picture error:', error);
+    if (req.file && req.file.public_id) {
+      try {
+        await cloudinary.uploader.destroy(req.file.public_id);
+      } catch (deleteError) {
+        console.error('Failed to delete file from Cloudinary:', deleteError);
+      }
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload profile picture',
+      error: error.message
+    });
+  }
+};
+
+// Refresh Token Controller
+exports.refreshToken = async (req, res) => {
+  try {
+    console.log('🔄 Refreshing token for user:', req.user._id);
+    
+    // Generate a new token with 10 hours expiration
+    const token = jwt.sign(
+      { id: req.user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '10h' }
+    );
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        profilePicture: req.user.profilePicture
+      }
+    });
+  } catch (error) {
+    console.error('❌ Token refresh error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to refresh token',
       error: error.message
     });
   }

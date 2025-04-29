@@ -2,57 +2,73 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
 // Middleware to verify JWT token
-const auth = async (req, res, next) => {
+module.exports = async (req, res, next) => {
   try {
-    console.log('\n🔒 Auth Middleware: Verifying token');
-
     // Get token from header
-    const authHeader = req.header('Authorization');
-    console.log('📝 Auth Header:', authHeader);
-
-    if (!authHeader) {
-      console.log('❌ No Authorization header found');
-      return res.status(401).json({ message: 'No authentication token, access denied' });
-    }
-
-    const token = authHeader.replace('Bearer ', '');
-    console.log('🔑 Token extracted:', token.substring(0, 20) + '...');
-
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
     if (!token) {
-      console.log('❌ Empty token after Bearer prefix removal');
-      return res.status(401).json({ message: 'No authentication token, access denied' });
+      console.log('❌ No token provided');
+      return res.status(401).json({
+        success: false,
+        message: 'No authentication token provided',
+        error: 'NO_TOKEN'
+      });
     }
 
-    // Verify token
-    console.log('🔍 Verifying token with secret:', process.env.JWT_SECRET ? 'Secret exists' : 'Secret missing');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('✅ Token verified successfully. Decoded payload:', decoded);
+    try {
+      // Verify token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log('🔑 Token decoded successfully:', decoded);
+      
+      // Find user by id
+      const user = await User.findById(decoded.id).select('-password');
+      
+      if (!user) {
+        console.log('❌ User not found for token');
+        return res.status(401).json({
+          success: false,
+          message: 'User not found',
+          error: 'USER_NOT_FOUND'
+        });
+      }
 
-    // Find user by id
-    console.log('🔍 Finding user with ID:', decoded.id);
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
-      console.log('❌ User not found in database with ID:', decoded.id);
-      return res.status(401).json({ message: 'User not found' });
+      // Add user to request object
+      req.user = user;
+      req.token = token;
+      
+      next();
+    } catch (error) {
+      console.error('❌ Token verification failed:', error.message);
+      
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Token expired',
+          error: 'TOKEN_EXPIRED'
+        });
+      }
+      
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token',
+          error: 'INVALID_TOKEN'
+        });
+      }
+      
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication failed',
+        error: 'AUTH_FAILED'
+      });
     }
-
-    console.log('✅ User found:', user.email);
-
-    // Add user to request object
-    req.user = user;
-    next();
   } catch (error) {
-    console.error('❌ Authentication error:', error);
-
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ message: 'Invalid token format' });
-    } else if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token has expired' });
-    }
-
-    res.status(401).json({ message: 'Token is invalid or expired' });
+    console.error('❌ Auth middleware error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during authentication',
+      error: 'SERVER_ERROR'
+    });
   }
 };
-
-module.exports = auth;
